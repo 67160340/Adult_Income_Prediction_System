@@ -1,48 +1,55 @@
-
 import streamlit as st
 import pandas as pd
-import numpy as np
 import joblib
-import json
 
-st.set_page_config(page_title="Income Predictor Pro", page_icon="💰", layout="centered")
+# 1. โหลดโมเดล (ใช้ Cache เพื่อความรวดเร็ว)
+@st.cache_resource 
+def load_model():
+    return joblib.load('income_model.pkl')
 
-@st.cache_resource
-def load_assets():
-    model = joblib.load('income_xgb_pipeline.pkl')
-    with open('feature_names.json', 'r') as f:
-        features = json.load(f)
-    return model, features
+model = load_model()
 
-model, model_features = load_assets()
+# 2. ส่วนหัวของเว็บ
+st.title("💰 โปรแกรมทำนายระดับรายได้")
+st.markdown("กรอกข้อมูลส่วนตัวด้านล่าง เพื่อทำนายว่ารายได้ของคุณจะ **มากกว่า 50,000 เหรียญต่อปี** หรือไม่?")
+st.divider()
 
-st.title("💰 Income Prediction System")
+# 3. จัด Layout เป็น 2 คอลัมน์ (ซ้าย-ขวา)
+col1, col2 = st.columns(2)
 
-with st.form("main_form"):
-    c1, c2 = st.columns(2)
-    with c1:
-        age = st.number_input("อายุ", 17, 90, 30)
-        edu = st.slider("ระดับการศึกษา (ปี)", 1, 16, 10)
-        gain = st.number_input("Capital Gain", 0)
-        sex = st.selectbox("เพศ", ["Male", "Female"])
-    with c2:
-        hours = st.number_input("ชั่วโมงทำงาน/สัปดาห์", 1, 99, 40)
-        work = st.selectbox("กลุ่มอาชีพ", ['Private', 'Self-emp-not-inc', 'Local-gov', 'State-gov', 'Federal-gov'])
-        marit = st.selectbox("สถานะการสมรส", ['Never-married', 'Married-civ-spouse', 'Divorced', 'Widowed'])
-        occ = st.selectbox("สายงาน", ['Prof-specialty', 'Exec-managerial', 'Adm-clerical', 'Sales', 'Craft-repair'])
+with col1:
+    age = st.number_input("อายุ (Age)", min_value=17, max_value=90, value=30)
+    education_num = st.number_input("ระดับการศึกษา (1-16)", min_value=1, max_value=16, value=10)
+    capital_gain = st.number_input("กำไรจากการลงทุน (Capital Gain)", min_value=0, value=0)
+
+with col2:
+    hours_per_week = st.number_input("ชั่วโมงทำงานต่อสัปดาห์", min_value=1, max_value=99, value=40)
+    is_married = st.selectbox("สถานะครอบครัว", ["โสด / อื่นๆ", "แต่งงาน (Married-civ-spouse)"])
+    is_exec = st.selectbox("อาชีพ", ["พนักงานทั่วไป / อื่นๆ", "ผู้บริหาร (Exec-managerial)"])
+
+st.divider()
+
+# แปลงค่าจาก Dropdown ให้เป็นตัวเลข 0 หรือ 1 ตามที่โมเดลเข้าใจ
+married_val = 1 if is_married == "แต่งงาน (Married-civ-spouse)" else 0
+exec_val = 1 if is_exec == "ผู้บริหาร (Exec-managerial)" else 0
+
+# 4. ปุ่มกดทำนายผลแบบเต็มความกว้าง
+if st.button("🚀 ทำนายผลรายได้", use_container_width=True):
     
-    btn = st.form_submit_button("วิเคราะห์ผลลัพธ์")
-
-if btn:
-    in_df = pd.DataFrame([{'age':age, 'education.num':edu, 'hours.per.week':hours, 'capital.gain':gain, 'workclass':work, 'marital.status':marit, 'sex':sex, 'occupation':occ}])
-    in_enc = pd.get_dummies(in_df)
-    final_in = pd.DataFrame(0, index=[0], columns=model_features)
-    for c in in_enc.columns:
-        if c in final_in.columns: final_in[c] = in_enc[c].iloc[0]
+    # ดึงค่าทั้งหมดมาสร้างเป็นตาราง 1 แถว (ชื่อคอลัมน์ต้องเป๊ะ)
+    input_data = pd.DataFrame([[
+        age, education_num, capital_gain, hours_per_week, married_val, exec_val
+    ]], columns=[
+        'age', 'education.num', 'capital.gain', 'hours.per.week', 
+        'marital.status_Married-civ-spouse', 'occupation_Exec-managerial'
+    ])
     
-    prob = model.predict_proba(final_in)[0][1]
-    st.divider()
-    if prob > 0.5:
-        st.success(f"### ผลการวิเคราะห์: รายได้ > $50K (โอกาส {prob*100:.1f}%)")
+    # ให้โมเดลทำนาย
+    prediction = model.predict(input_data)[0]
+    
+    # แสดงผลลัพธ์
+    if prediction == 1:
+        st.success("🎉 **ผลการทำนาย:** รายได้ของคุณมีแนวโน้ม **มากกว่า $50K ต่อปี (>50K)**")
+        st.balloons()
     else:
-        st.warning(f"### ผลการวิเคราะห์: รายได้ <= $50K (โอกาส {(1-prob)*100:.1f}%)")
+        st.warning("💵 **ผลการทำนาย:** รายได้ของคุณมีแนวโน้ม **น้อยกว่าหรือเท่ากับ $50K ต่อปี (<=50K)**")
